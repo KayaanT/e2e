@@ -119,7 +119,6 @@ export function agentDeviceLeases({ provider, label }: AgentDeviceLeaseOptions):
         resource.stopHeartbeat = await startHeartbeat(resource.stateDir, scope, request.log);
         request.log(`lease ${id}: ${summary}`);
         // The worker's client is created with these fields: the scope picks the lease, and the selectors match the session it holds.
-        // `device` stays off: agent-device would send it as a `--device` selector on every command.
         const { device: _device, ...clientSelectors } = allocated;
         return { id, client: { stateDir: resource.stateDir, ...scope, ...clientSelectors } };
       } catch (cause) {
