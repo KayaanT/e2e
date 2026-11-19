@@ -305,8 +305,10 @@ class RevylWebSurface {
   /**
    * A screenshot artifact promises secure fields masked at the source, and
    * Revyl cannot mask one, so no screenshot is taken while a password field
-   * shows text that is not its placeholder. It fails closed: a password
-   * answer that matches no element counts by its own box and text.
+   * is on screen without its placeholder showing. Revyl reports a password
+   * field's text as empty whether or not it holds a value, so only a shown
+   * placeholder proves it empty. It fails closed: a password answer that
+   * matches no element counts by its own box.
    */
   async #refuseFilledPassword(signal: AbortSignal): Promise<void> {
     const [tree, matched] = await this.#read([{ kind: 'secure' }, { kind: 'placeholderShown' }], signal);
@@ -316,7 +318,7 @@ class RevylWebSurface {
     const { width, height } = this.#viewport;
     const filled = [...secureNodes(elements, matched), ...answers('secure')].some((node) => {
       const { left, top, right, bottom } = node.attributes.bounds;
-      const empty = node.attributes.text === '' || placeholders.some((placeholder) => sameAttributes(placeholder, node));
+      const empty = placeholders.some((placeholder) => sameAttributes(placeholder, node));
       return !empty && right > Math.max(0, left) && bottom > Math.max(0, top) && left < width && top < height;
     });
     if (filled) {

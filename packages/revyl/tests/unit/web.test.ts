@@ -731,7 +731,18 @@ describe('revylWeb()', () => {
     expect((await engine.locate!(role('button', 'Save'), context())).map((found) => found.name)).toEqual(['Save']);
   });
 
-  it('takes a screenshot while a password field is empty', async () => {
+  it('takes no screenshot while a password field Revyl reports as empty shows no placeholder', async () => {
+    const password = node('', [100, 300, 600, 330], [], 'password');
+    tree = () => node('', [0, 0, 1280, 800], [password]);
+    queries['input[type="password"]'] = [password];
+    queries[FIELD] = [password];
+    queries[':placeholder-shown'] = [];
+    const engine = await started();
+    await engine.startAttempt!({ attemptId: 'a', artifactsDir: mkdtempSync(join(tmpdir(), 'revyl-web-')), signal: new AbortController().signal, environment: () => undefined } as never);
+    await expect(engine.artifacts!.screenshot!('after', context())).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
+  });
+
+  it('takes a screenshot while a password field shows its placeholder', async () => {
     const password = node('Password', [100, 300, 600, 330], [], 'password');
     tree = () => node('', [0, 0, 1280, 800], [password]);
     queries['input[type="password"]'] = [password];
