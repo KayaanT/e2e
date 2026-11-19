@@ -82,7 +82,7 @@ export class RevylWebClient {
     return build.id;
   }
 
-  /** Starts a session and waits until its browser takes actions; stops it again when the wait fails. */
+  /** Starts a session and waits until its browser takes actions. A failed start leaves the session to the caller, which stops it at dispose. */
   async startSession(
     request: { sessionId: string; appId: string; buildId: string; viewport: WebViewport; idleTimeoutSeconds: number },
     signal: AbortSignal,
@@ -144,49 +144,57 @@ export class RevylWebClient {
 
   /**
    * Sends one mutating action. A transport failure, a 5xx, a deadline that
-   * ends it in flight, or an answer that says input was dispatched is
-   * `ACTION_MAY_HAVE_COMMITTED`, so the runner never repeats it blindly.
+   * ends it in flight, an empty answer, or an answer that says input was
+   * dispatched is `ACTION_MAY_HAVE_COMMITTED`, so the runner never repeats it
+   * blindly. For a `sensitive` action (a secret fill) no message carries
+   * Revyl's own words and no error keeps the response as its cause, since
+   * Revyl may echo the request back.
    */
-  async act(workflowRunId: string, action: string, body: object | undefined, signal: AbortSignal): Promise<void> {
+  async act(workflowRunId: string, action: string, body: object | undefined, signal: AbortSignal, sensitive = false): Promise<void> {
     if (signal.aborted) throw signal.reason;
-    let result: ActionResponse;
+    const said = (text: string): string => (sensitive ? 'details withheld from a sensitive fill' : text);
+    const options = (cause?: unknown): { retryable: false; cause?: unknown } => ({ retryable: false, ...(sensitive || cause === undefined ? {} : { cause }) });
+    let result: ActionResponse | undefined;
     try {
-      result = await this.#beforeDispatch(signal, () => this.#json<ActionResponse>('POST', this.#proxy(workflowRunId, action), body ?? {}, signal, PROXY_TIMEOUT_MS));
+      result = await this.#beforeDispatch(signal, () => this.#json<ActionResponse | undefined>('POST', this.#proxy(workflowRunId, action), body ?? {}, signal, PROXY_TIMEOUT_MS));
     } catch (error) {
       if (signal.aborted) {
         const reason: unknown = signal.reason;
         if (!(reason instanceof EngineError && reason.code === 'OPERATION_TIMEOUT')) throw reason;
-        throw new EngineError('ACTION_MAY_HAVE_COMMITTED', `Revyl ${action} was still running at the deadline; the page may have received it`, { retryable: false, cause: reason });
+        throw new EngineError('ACTION_MAY_HAVE_COMMITTED', `Revyl ${action} was still running at the deadline; the page may have received it`, options(reason));
       }
       if (error instanceof RevylHttpError && [401, 403, 404, 409, 429].includes(error.status)) {
         // The key, the session, or the worker's hold on it is gone (a revoked
         // key, an ended or stopping session, a crashed worker), or Revyl kept
         // limiting the rate past the retries. The page did nothing wrong, and
         // the worker needs a new session, which a test failure would not give it.
-        throw new EngineError('ENGINE_FAILURE', `Revyl refused ${action} for the session: ${error.detail}`, { retryable: false, cause: error });
+        throw new EngineError('ENGINE_FAILURE', `Revyl refused ${action} for the session: ${said(error.detail)}`, options(error));
       }
-      if (error instanceof RevylHttpError && error.status < 500) {
-        throw new EngineError('NOT_ACTIONABLE', `Revyl ${action}: ${error.detail}`, { retryable: false, cause: error });
-      }
+      if (error instanceof RevylHttpError && error.status < 500) throw new EngineError('NOT_ACTIONABLE', `Revyl ${action}: ${said(error.detail)}`, options(error));
       const reason = error instanceof Error ? error.message : String(error);
-      throw new EngineError('ACTION_MAY_HAVE_COMMITTED', `Revyl ${action} failed in transit; the page may have received it (${reason})`, { retryable: false, cause: error });
+      throw new EngineError('ACTION_MAY_HAVE_COMMITTED', `Revyl ${action} failed in transit; the page may have received it (${said(reason)})`, options(error));
+    }
+    if (result === undefined || typeof result !== 'object') {
+      throw new EngineError('ACTION_MAY_HAVE_COMMITTED', `Revyl ${action} answered with no result; the page may have received it`, options());
     }
     if (result.success === true && result.execution_uncertain !== true) return;
     if (result.execution_uncertain === true || result.input_dispatched === true) {
-      throw new EngineError('ACTION_MAY_HAVE_COMMITTED', `Revyl ${action} did not confirm it finished (${result.error ?? 'uncertain'})`, { retryable: false });
+      throw new EngineError('ACTION_MAY_HAVE_COMMITTED', `Revyl ${action} did not confirm it finished (${said(result.error ?? 'uncertain')})`, options());
     }
-    throw new EngineError('NOT_ACTIONABLE', `Revyl ${action} failed: ${result.error ?? 'no reason given'}`, { retryable: false });
+    throw new EngineError('NOT_ACTIONABLE', `Revyl ${action} failed: ${said(result.error ?? 'no reason given')}`, options());
   }
 
   async #waitUntilRunning(sessionId: string, signal: AbortSignal): Promise<string> {
     const started = Date.now();
     for (;;) {
-      const detail = await this.#json<{ status?: unknown; workflow_run_id?: unknown; viewer_kind?: unknown; error_message?: unknown }>(
-        'GET',
-        `/api/v1/execution/device-sessions/${encodeURIComponent(sessionId)}`,
-        undefined,
-        signal,
-        CONTROL_TIMEOUT_MS,
+      const detail = await this.#read(signal, () =>
+        this.#json<{ status?: unknown; workflow_run_id?: unknown; viewer_kind?: unknown; error_message?: unknown }>(
+          'GET',
+          `/api/v1/execution/device-sessions/${encodeURIComponent(sessionId)}`,
+          undefined,
+          signal,
+          CONTROL_TIMEOUT_MS,
+        ),
       );
       if (typeof detail.status === 'string' && TERMINAL_STATUSES.has(detail.status)) {
         const reason = typeof detail.error_message === 'string' ? detail.error_message : detail.status;

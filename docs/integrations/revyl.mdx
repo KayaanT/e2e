@@ -189,10 +189,12 @@ own text, its box, and one identifier (its `id`, `aria-label`, `name`,
 tags or roles, so the engine asks Revyl which elements match a CSS selector
 for each role, exact test id, or exact placeholder a locator names.
 
-- `getByRole` matches the elements HTML gives that role (`button`,
-  `a[href]`, `input`, `h1` to `h6`, and others) and any element with that
-  `role` attribute. The name of a button, link, heading, or list item is its
-  text; the name of a field is its identifier.
+- `getByRole` matches the elements HTML gives that role, mapped as the
+  `web()` engine maps them (a number input is a `spinbutton`, a search
+  input a `searchbox`, a multi-row `select` a `listbox`), and any element
+  with that `role` attribute, which wins over the implicit one. The name of
+  a button, link, heading, or list item is its text; the name of a field is
+  its identifier.
 - `getByTestId` with an exact string matches `testIdAttribute`; a regular
   expression matches the identifier.
 - `getByLabel` matches a field's identifier, not the text of its `<label>`.
@@ -239,7 +241,7 @@ for each role, exact test id, or exact placeholder a locator names.
   only the origin and path.
 - A password field's value is never reported. Revyl cannot mask one in a
   screenshot, so `app.screenshot()` fails with `UNSUPPORTED_CAPABILITY`
-  while a filled password field is on screen. The agent cannot type a secret
+  while a password field on screen shows anything but its placeholder. The agent cannot type a secret
   it observed; `fill` with a secret sends it to Revyl like any other text.
 - Revyl web sessions do not record video for e2e; use `app.screenshot()`.
 - Revyl refuses CSS queries on a very large page with `413

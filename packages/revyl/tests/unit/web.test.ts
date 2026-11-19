@@ -15,6 +15,7 @@ import { markSelector, type MaestroNode } from '../../src/web/tree.ts';
 const APP = 'app-1';
 const roleCss = (role: string): string => markSelector({ kind: 'role', role });
 const CHECKED = markSelector({ kind: 'state', state: 'checked' });
+const FIELD = markSelector({ kind: 'field' });
 const DISABLED = markSelector({ kind: 'state', state: 'disabled' });
 const RUN = 'run-1';
 
@@ -171,6 +172,7 @@ describe('revylWeb()', () => {
   it('observes the page with roles from CSS queries, placeholders, and wrappers left out', async () => {
     queries[roleCss('button')] = [save];
     queries[roleCss('textbox')] = [input];
+    queries[FIELD] = [input];
     const engine = await started();
     const snapshot = await engine.observe!(context());
     expect(snapshot.location).toBe('https://example.com/todos');
@@ -196,6 +198,7 @@ describe('revylWeb()', () => {
     const edit = node('buy milk', [0, 0, 0, 0], [], 'Edit');
     tree = () => node('', [0, 0, 1280, 800], [node('', [0, 0, 1280, 800], [title, edit])]);
     queries[roleCss('textbox')] = [edit];
+    queries[FIELD] = [edit];
     queries[':placeholder-shown'] = [];
     const engine = await started();
     const matches = await engine.locate!({ kind: 'query', query: { kind: 'text', value: { kind: 'string', value: 'buy milk', exact: true } } }, context());
@@ -206,6 +209,7 @@ describe('revylWeb()', () => {
     const select = node('Option 2', [100, 300, 600, 330], [], 'dropdown');
     tree = () => node('', [0, 0, 1280, 800], [select]);
     queries[roleCss('combobox')] = [select];
+    queries[FIELD] = [select];
     const engine = await started();
     const [combobox] = await engine.locate!(role('combobox'), context());
     expect([combobox?.role, combobox?.value, combobox?.text]).toEqual(['combobox', 'Option 2', undefined]);
@@ -232,6 +236,7 @@ describe('revylWeb()', () => {
     tree = () => node('', [0, 0, 1280, 800], [edit]);
     queries[':is(input, textarea)[aria-label="Edit"]'] = [edit];
     queries[roleCss('textbox')] = [edit];
+    queries[FIELD] = [edit];
     queries[':placeholder-shown'] = [];
     const engine = await started();
     const [field] = await engine.locate!(role('textbox'), context());
@@ -242,6 +247,7 @@ describe('revylWeb()', () => {
     info = { width_pixels: 2560, height_pixels: 1600, width_grid: 1280, height_grid: 800 };
     queries[roleCss('button')] = [save];
     queries[roleCss('textbox')] = [input];
+    queries[FIELD] = [input];
     const engine = await started();
     const [button] = await engine.locate!(role('button'), context());
     const [field] = await engine.locate!(role('textbox'), context());
@@ -377,6 +383,7 @@ describe('revylWeb()', () => {
     const cell = node('', [0, 290, 700, 340], [node('Password', [0, 300, 90, 330]), password]);
     tree = () => node('', [0, 0, 1280, 800], [cell]);
     queries[roleCss('textbox')] = [password];
+    queries[FIELD] = [password];
     queries[roleCss('cell')] = [cell];
     queries['input[type="password"]'] = [password];
     queries[':placeholder-shown'] = [];
@@ -495,7 +502,8 @@ describe('revylWeb()', () => {
   });
 
   it('lets an explicit role win over the element\'s implicit one', () => {
-    expect(roleCss('textbox')).toContain('input[type="text"]:not([role])');
+    expect(roleCss('spinbutton')).toBe('input[type="number"]:not([role]), [role="spinbutton"]');
+    expect(roleCss('textbox')).toContain('textarea:not([role])');
     expect(roleCss('combobox')).toContain('[role="combobox"]');
   });
 
@@ -546,6 +554,7 @@ describe('revylWeb()', () => {
     const notes = node('Search', [100, 200, 600, 230], [], 'notes');
     tree = () => node('', [0, 0, 1280, 800], [search, notes]);
     queries[roleCss('textbox')] = [search, notes];
+    queries[FIELD] = [search, notes];
     queries[':placeholder-shown'] = [];
     queries[':is(input, textarea)[aria-label="Search"]'] = [search];
     const engine = await started();
@@ -564,7 +573,8 @@ describe('revylWeb()', () => {
 
   it('presses a key without a tap on a focused field, and refuses one on a button', async () => {
     queries[roleCss('button')] = [save];
-    queries[`input:not([type]):not([role]), input[type="text"]:not([role]), input[type="email"]:not([role]), input[type="password"]:not([role]), input[type="search"]:not([role]), input[type="tel"]:not([role]), input[type="url"]:not([role]), input[type="number"]:not([role]), textarea:not([role]), [contenteditable=""]:not([role]), [contenteditable="true"]:not([role]), [role="textbox"]`] = [input];
+    queries[roleCss('textbox')] = [input];
+    queries[FIELD] = [input];
     queries[':focus'] = [input];
     queries[markSelector({ kind: 'textEntry' })] = [input];
     const engine = await started();
@@ -583,6 +593,7 @@ describe('revylWeb()', () => {
     tree = () => node('', [0, 0, 1280, 800], [password]);
     queries['input[type="password"]'] = [password];
     queries[roleCss('textbox')] = [password];
+    queries[FIELD] = [password];
     queries[':placeholder-shown'] = [];
     const engine = await started();
     await engine.startAttempt!({ attemptId: 'a', artifactsDir: '/tmp/revyl-web-test', signal: new AbortController().signal, environment: () => undefined } as never);
@@ -675,7 +686,7 @@ describe('revylWeb()', () => {
       return response;
     });
     await engine.observe!(context());
-    for (const css of ['input[type="password"]', ':placeholder-shown', roleCss('textbox'), roleCss('combobox')]) expect(askedEarly).not.toContain(css);
+    for (const css of ['input[type="password"]', ':placeholder-shown', FIELD]) expect(askedEarly).not.toContain(css);
     expect(askedEarly).toContain(roleCss('button'));
   });
 
@@ -725,10 +736,83 @@ describe('revylWeb()', () => {
     tree = () => node('', [0, 0, 1280, 800], [password]);
     queries['input[type="password"]'] = [password];
     queries[roleCss('textbox')] = [password];
+    queries[FIELD] = [password];
     queries[':placeholder-shown'] = [password];
     const engine = await started();
     await engine.startAttempt!({ attemptId: 'a', artifactsDir: mkdtempSync(join(tmpdir(), 'revyl-web-')), signal: new AbortController().signal, environment: () => undefined } as never);
     await expect(engine.artifacts!.screenshot!('empty', context())).resolves.toMatch(/screenshots\/revyl-1-empty\.png$/);
+  });
+
+  it('keeps a password field secure when its answer moved between the reads', async () => {
+    const password = node('hunter2', [100, 300, 600, 330], [], 'password');
+    tree = () => node('', [0, 0, 1280, 800], [password]);
+    queries[FIELD] = [password];
+    queries['input[type="password"]'] = [node('hunter2', [100, 301, 600, 331], [], 'password')];
+    queries[':placeholder-shown'] = [];
+    const engine = await started();
+    const snapshot = await engine.observe!(context());
+    expect(JSON.stringify(snapshot.root)).not.toContain('hunter2');
+    await engine.startAttempt!({ attemptId: 'a', artifactsDir: mkdtempSync(join(tmpdir(), 'revyl-web-')), signal: new AbortController().signal, environment: () => undefined } as never);
+    await expect(engine.artifacts!.screenshot!('after', context())).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
+  });
+
+  it('never sends a password value to Revyl as a selector', async () => {
+    const password = node('hunter2', [100, 300, 600, 330], [], 'password');
+    tree = () => node('', [0, 0, 1280, 800], [password]);
+    queries[FIELD] = [password];
+    queries[roleCss('textbox')] = [password];
+    queries['input[type="password"]'] = [password];
+    queries[':placeholder-shown'] = [];
+    const engine = await started();
+    await engine.observe!(context());
+    await engine.locate!(role('textbox'), context());
+    expect(JSON.stringify(calls.map((call) => call.body))).not.toContain('hunter2');
+  });
+
+  it('keeps Revyl\'s words and the cause out of a sensitive fill\'s error', async () => {
+    queries[roleCss('textbox')] = [input];
+    queries[FIELD] = [input];
+    const engine = await started();
+    const [field] = await engine.locate!(role('textbox'), context());
+    actionResult = { status: 422, body: { detail: [{ loc: ['body', 'text'], input: 'hunter2' }] } };
+    const error = await engine.perform!(field!.ref, { kind: 'fill', value: 'hunter2', sensitive: true }, context()).catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ code: 'NOT_ACTIONABLE' });
+    expect(String((error as Error).message)).not.toContain('hunter2');
+    expect((error as Error).cause).toBeUndefined();
+  });
+
+  it('keeps an operation within a budget under one second', async () => {
+    const engine = await started();
+    delays = { maestro_web_hierarchy: 600 };
+    const begun = Date.now();
+    await expect(engine.observe!({ ...context(), timeoutMs: 100 })).rejects.toMatchObject({ code: 'OPERATION_TIMEOUT' });
+    expect(Date.now() - begun).toBeLessThan(500);
+  });
+
+  it('treats an action answered with an empty body as one that may have run', async () => {
+    const engine = await started();
+    const inner = globalThis.fetch;
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit) => (new URL(url).pathname.endsWith('/tap') ? new Response('', { status: 200 }) : inner(url, init)));
+    await expect(engine.performAt!({ x: 10, y: 10 }, { kind: 'tap' }, context())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED' });
+  });
+
+  it('polls the starting session again after a gateway error', async () => {
+    let failures = 1;
+    const inner = globalThis.fetch;
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit) =>
+      new URL(url).pathname.startsWith('/api/v1/execution/device-sessions/') && failures-- > 0 ? new Response('<html>bad gateway</html>', { status: 502 }) : inner(url, init),
+    );
+    await expect(started()).resolves.toBeDefined();
+  });
+
+  it('maps input types to roles as the web engine reads them', () => {
+    expect(roleCss('spinbutton')).toContain('input[type="number"]');
+    expect(roleCss('searchbox')).toContain('input[type="search"]:not([list])');
+    expect(roleCss('button')).toContain('input[type="file"]:not([role])');
+    expect(roleCss('button')).toContain('input[type="image"]:not([role])');
+    expect(roleCss('combobox')).toContain('input[list]');
+    expect(roleCss('listbox')).toContain('select[multiple]:not([role])');
+    expect(roleCss('textbox')).not.toContain('[type="number"]:not([role])');
   });
 
   it('resolves a CSS selector through the page', async () => {

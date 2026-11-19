@@ -45,6 +45,7 @@ import {
   isVolatile,
   labelShownMarks,
   sameAttributes,
+  secureNodes,
   type Mark,
   type MaestroNode,
 } from './tree.ts';
@@ -105,7 +106,7 @@ export function revylWeb(options: RevylWebOptions): EngineHandle {
     startAttempt: async (context) => {
       surface.artifactsDir = context.artifactsDir;
       context.environment({ browser: 'Chrome (Revyl)' });
-      await surface.startAttempt(AbortSignal.any([context.signal, AbortSignal.timeout(60_000)]));
+      await surface.startAttempt(context.signal);
     },
     observe: (context, observeOptions) => surface.observe(context, observeOptions?.pixels === true),
     locate: (expression, context) => surface.locate(expression, context),
@@ -212,6 +213,7 @@ class RevylWebSurface {
    * attempt: one tab, the first, and the configured viewport.
    */
   async startAttempt(signal: AbortSignal): Promise<void> {
+    this.#answers = undefined;
     this.#scrolledFrom.clear();
     await this.#closeExtraTabs(signal);
     if (this.#viewport.width !== this.#configured.width || this.#viewport.height !== this.#configured.height) {
@@ -303,18 +305,19 @@ class RevylWebSurface {
   /**
    * A screenshot artifact promises secure fields masked at the source, and
    * Revyl cannot mask one, so no screenshot is taken while a password field
-   * with a value is on screen.
+   * shows text that is not its placeholder. It fails closed: a password
+   * answer that matches no element counts by its own box and text.
    */
   async #refuseFilledPassword(signal: AbortSignal): Promise<void> {
-    const [tree, matched] = await this.#read([{ kind: 'secure' }, { kind: 'role', role: 'textbox' }, { kind: 'placeholderShown' }], signal);
+    const [tree, matched] = await this.#read([{ kind: 'secure' }, { kind: 'placeholderShown' }], signal);
     const elements = flatten(tree);
-    const ids = (kind: Mark['kind']): Set<string> => new Set(matched.flatMap(([mark, matches]) => (mark.kind === kind ? [...matchElements(elements, matches)] : [])));
-    const secure = ids('secure');
-    const empty = new Set([...ids('placeholderShown'), ...ids('labelShown')]);
+    const answers = (kind: Mark['kind']): readonly MaestroNode[] => matched.flatMap(([mark, matches]) => (mark.kind === kind ? matches : []));
+    const placeholders = answers('placeholderShown');
     const { width, height } = this.#viewport;
-    const filled = elements.some(({ id, node }) => {
+    const filled = [...secureNodes(elements, matched), ...answers('secure')].some((node) => {
       const { left, top, right, bottom } = node.attributes.bounds;
-      return secure.has(id) && !empty.has(id) && node.attributes.text !== '' && right > Math.max(0, left) && bottom > Math.max(0, top) && left < width && top < height;
+      const empty = node.attributes.text === '' || placeholders.some((placeholder) => sameAttributes(placeholder, node));
+      return !empty && right > Math.max(0, left) && bottom > Math.max(0, top) && left < width && top < height;
     });
     if (filled) {
       throw new EngineError('UNSUPPORTED_CAPABILITY', 'revylWeb takes no screenshot while a filled password field is on screen: Revyl cannot mask it', { retryable: false });
@@ -349,7 +352,7 @@ class RevylWebSurface {
       case 'hover':
         return this.#act('hover', point, signal);
       case 'fill':
-        return this.#act('input', { ...point, text: action.value, clear_first: true }, signal);
+        return this.#act('input', { ...point, text: action.value, clear_first: true }, signal, action.sensitive);
       case 'clear':
         return this.#act('clear_text', point, signal);
       case 'press':
@@ -412,12 +415,12 @@ class RevylWebSurface {
     }
   }
 
-  async #act(action: string, body: object | undefined, signal: AbortSignal): Promise<void> {
+  async #act(action: string, body: object | undefined, signal: AbortSignal, sensitive = false): Promise<void> {
     // Any action can change the page: no answer is kept across it, and a node
     // a scroll could not reach may be reachable after it.
     this.#answers = undefined;
     this.#scrolledFrom.clear();
-    await this.#bound.client.act(this.#bound.run, action, body, signal);
+    await this.#bound.client.act(this.#bound.run, action, body, signal, sensitive);
   }
 
   /**
@@ -465,9 +468,9 @@ class RevylWebSurface {
 
   /** Asks each distinct selector of `marks` once, in parallel. */
   async #ask(marks: readonly Mark[], signal: AbortSignal): Promise<Map<string, readonly MaestroNode[]>> {
-    const selectors = [...new Set(marks.map(markSelector))];
-    const answers = await Promise.all(selectors.map((selector) => this.#query(selector, signal)));
-    return new Map(selectors.map((selector, index) => [selector, answers[index] ?? []]));
+    const bySelector = new Map(marks.map((mark) => [markSelector(mark), mark]));
+    const answers = await Promise.all([...bySelector.values()].map((mark) => this.#query(mark, signal)));
+    return new Map([...bySelector.keys()].map((selector, index) => [selector, answers[index] ?? []]));
   }
 
   /**
@@ -485,12 +488,14 @@ class RevylWebSurface {
     if (left.length !== 1) throw new EngineError('INVALID_STATE', `Revyl kept ${left.length} tabs open after closing the extra ones`, { retryable: false });
   }
 
-  async #query(css: string, signal: AbortSignal): Promise<readonly MaestroNode[]> {
+  /** One CSS query. A refusal names the selector only for a test's own CSS: the engine's own can carry page text. */
+  async #query(mark: Mark, signal: AbortSignal): Promise<readonly MaestroNode[]> {
     try {
-      return await this.#bound.client.query(this.#bound.run, css, signal);
+      return await this.#bound.client.query(this.#bound.run, markSelector(mark), signal);
     } catch (error) {
       if (error instanceof RevylHttpError && error.status === 400) {
-        throw new EngineError('UNSUPPORTED_CAPABILITY', `Revyl refused the selector ${JSON.stringify(css)}`, { retryable: false, cause: error });
+        if (mark.kind === 'selector') throw new EngineError('UNSUPPORTED_CAPABILITY', `Revyl refused the selector ${JSON.stringify(mark.selector)}`, { retryable: false, cause: error });
+        throw new EngineError('ENGINE_FAILURE', `Revyl refused the engine's ${mark.kind} query`, { retryable: false });
       }
       throw error;
     }
@@ -505,7 +510,7 @@ class RevylWebSurface {
     }
     for (const element of elements) this.#minted.set(element.id, { node: element.node, context: ancestry(tree, element.id) });
     const testIds = new Set(matched.flatMap(([mark]) => (mark.kind === 'testId' ? [mark.value] : [])));
-    return project(elements, { marks, testIds }, this.#viewport, observed);
+    return project(elements, { marks, testIds, secure: secureNodes(elements, matched) }, this.#viewport, observed);
   }
 
   /**
@@ -635,7 +640,7 @@ function subtreeText(node: MaestroNode): string {
 
 /** A mark that decides whether a field's text is reported at all: asked only after the hierarchy it applies to. */
 function guardsText(mark: Mark): boolean {
-  return mark.kind === 'secure' || mark.kind === 'placeholderShown' || (mark.kind === 'role' && (mark.role === 'textbox' || mark.role === 'combobox'));
+  return mark.kind === 'secure' || mark.kind === 'placeholderShown' || mark.kind === 'field';
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -674,7 +679,7 @@ function revylKey(key: string): { key: string; modifiers: string[] } {
  * `ACTION_MAY_HAVE_COMMITTED`.
  */
 async function withDeadline<T>(context: OperationContext, label: string, work: (signal: AbortSignal) => Promise<T>): Promise<T> {
-  const timeoutMs = Math.max(1_000, context.timeoutMs);
+  const timeoutMs = Math.max(1, context.timeoutMs);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new EngineError('OPERATION_TIMEOUT', `revylWeb ${label} took longer than ${timeoutMs} ms`, { retryable: false })), timeoutMs);
   try {
