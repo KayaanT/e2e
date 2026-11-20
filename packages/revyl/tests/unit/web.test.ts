@@ -767,6 +767,39 @@ describe('revylWeb()', () => {
     await expect(engine.artifacts!.screenshot!('after', context())).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
   });
 
+  it('takes no screenshot while a password field Revyl reports as empty has an answer that moved between the reads', async () => {
+    const password = node('', [100, 300, 600, 330], [], 'password');
+    tree = () => node('', [0, 0, 1280, 800], [password]);
+    queries[FIELD] = [password];
+    queries['input[type="password"]'] = [node('', [100, 301, 600, 331], [], 'password')];
+    queries[':placeholder-shown'] = [];
+    const engine = await started();
+    await engine.startAttempt!({ attemptId: 'a', artifactsDir: mkdtempSync(join(tmpdir(), 'revyl-web-')), signal: new AbortController().signal, environment: () => undefined } as never);
+    await expect(engine.artifacts!.screenshot!('after', context())).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
+    expect(calls.some((call) => call.path.endsWith('/screenshot'))).toBe(false);
+  });
+
+  it('names a refused test id, but not a refused engine query, which can carry page text', async () => {
+    const note = node('my secret note', [100, 300, 600, 330]);
+    tree = () => node('', [0, 0, 1280, 800], [note]);
+    queries[FIELD] = [note];
+    queries[':placeholder-shown'] = [];
+    const refused = new Set([markSelector({ kind: 'labelShown', label: 'my secret note' }), markSelector({ kind: 'testId', value: 'save', attribute: 'data-testid' })]);
+    const inner = globalThis.fetch;
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit) =>
+      String(url).endsWith('/maestro_web_query') && refused.has((JSON.parse(String(init.body)) as { css: string }).css) ? new Response('{"detail":"bad selector"}', { status: 400 }) : inner(url, init),
+    );
+    const engine = await started();
+    const error = await engine.observe!(context()).catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ code: 'ENGINE_FAILURE' });
+    expect(String((error as Error).message)).not.toContain('my secret note');
+    expect((error as Error).cause).toBeUndefined();
+    await expect(engine.locate!({ kind: 'query', query: { kind: 'testId', value: { kind: 'string', value: 'save', exact: true } } }, context())).rejects.toMatchObject({
+      code: 'UNSUPPORTED_CAPABILITY',
+      message: expect.stringContaining('"save"'),
+    });
+  });
+
   it('never sends a password value to Revyl as a selector', async () => {
     const password = node('hunter2', [100, 300, 600, 330], [], 'password');
     tree = () => node('', [0, 0, 1280, 800], [password]);

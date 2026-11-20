@@ -243,8 +243,8 @@ for each role, exact test id, or exact placeholder a locator names.
   screenshot, and reports a password field's text as empty whether or not
   it holds a value, so `app.screenshot()` fails with
   `UNSUPPORTED_CAPABILITY` while a password field is on screen without its
-  placeholder showing. The agent cannot type a secret
-  it observed; `fill` with a secret sends it to Revyl like any other text.
+  placeholder showing. The agent cannot type a secret it observed; `fill`
+  with a secret sends it to Revyl like any other text.
 - Revyl web sessions do not record video for e2e; use `app.screenshot()`.
 - Revyl refuses CSS queries on a very large page with `413
   capacity_exhausted`, and the step fails with `ENGINE_FAILURE`.

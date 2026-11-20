@@ -490,13 +490,17 @@ class RevylWebSurface {
     if (left.length !== 1) throw new EngineError('INVALID_STATE', `Revyl kept ${left.length} tabs open after closing the extra ones`, { retryable: false });
   }
 
-  /** One CSS query. A refusal names the selector only for a test's own CSS: the engine's own can carry page text. */
+  /**
+   * One CSS query. A refusal names only a value the test wrote, a selector,
+   * test id, placeholder, or role; the engine's own queries can carry page text.
+   */
   async #query(mark: Mark, signal: AbortSignal): Promise<readonly MaestroNode[]> {
     try {
       return await this.#bound.client.query(this.#bound.run, markSelector(mark), signal);
     } catch (error) {
       if (error instanceof RevylHttpError && error.status === 400) {
-        if (mark.kind === 'selector') throw new EngineError('UNSUPPORTED_CAPABILITY', `Revyl refused the selector ${JSON.stringify(mark.selector)}`, { retryable: false, cause: error });
+        const value = mark.kind === 'selector' ? mark.selector : mark.kind === 'testId' || mark.kind === 'placeholder' ? mark.value : mark.kind === 'role' ? mark.role : undefined;
+        if (value !== undefined) throw new EngineError('UNSUPPORTED_CAPABILITY', `Revyl refused the ${mark.kind} ${JSON.stringify(value)}`, { retryable: false, cause: error });
         throw new EngineError('ENGINE_FAILURE', `Revyl refused the engine's ${mark.kind} query`, { retryable: false });
       }
       throw error;
