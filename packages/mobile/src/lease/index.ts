@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { DeviceClientConfig } from '../bindings.ts';
 import type { DeviceLease, DeviceReleaseContext, DeviceRequest } from '../provider.ts';
+import { installedIdentity } from '../support.ts';
 import { startDriver, stopDriver } from './daemon.ts';
 import { LEASE_TTL_MS, startHeartbeat } from './heartbeat.ts';
 
@@ -158,9 +159,7 @@ async function installApp(client: DeviceClientConfig, request: DeviceRequest, ap
   const installer = createAgentDeviceClient({ ...client, session: `e2e-install-${client.leaseId}`, daemonBaseUrl: '', daemonAuthToken: '', daemonTransport: 'auto' });
   try {
     const installed = await installer.apps.install({ appPath, platform: request.platform, signal: request.signal, ...(request.app === undefined ? {} : { app: request.app }) });
-    const app = installed.bundleId ?? installed.package ?? installed.appId ?? request.app;
-    if (app === undefined) throw new Error(`installing ${appPath} reported no bundle id or package; set app.bundleId to the app to open`);
-    return app;
+    return installedIdentity(installed, request.app, appPath).app;
   } finally {
     await installer.sessions.close({ signal: AbortSignal.timeout(10_000) }).catch(() => {});
   }

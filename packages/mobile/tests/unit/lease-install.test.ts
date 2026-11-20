@@ -103,4 +103,13 @@ describe('agentDeviceLeases() installAppPath', () => {
     expect(mocks.stopHeartbeat).toHaveBeenCalledOnce();
     expect(mocks.stop).toHaveBeenCalledOnce();
   });
+
+  it('fails the acquire with ENGINE_FAILURE, and releases the lease, when the install names no app', async () => {
+    mocks.install.mockResolvedValueOnce({});
+    await expect(leases().acquire(request({ app: undefined }), allocation)).rejects.toMatchObject({
+      code: 'ENGINE_FAILURE',
+      message: expect.stringContaining('reported no bundle id or package'),
+    });
+    expect(mocks.stop).toHaveBeenCalledOnce();
+  });
 });
