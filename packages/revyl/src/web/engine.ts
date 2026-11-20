@@ -491,15 +491,16 @@ class RevylWebSurface {
   }
 
   /**
-   * One CSS query. A refusal names only a value the test wrote, a selector,
-   * test id, placeholder, or role; the engine's own queries can carry page text.
+   * One CSS query. A refusal names only a value the test wrote into the CSS,
+   * a selector, test id, or placeholder; the engine builds the rest, and they
+   * can carry page text.
    */
   async #query(mark: Mark, signal: AbortSignal): Promise<readonly MaestroNode[]> {
     try {
       return await this.#bound.client.query(this.#bound.run, markSelector(mark), signal);
     } catch (error) {
       if (error instanceof RevylHttpError && error.status === 400) {
-        const value = mark.kind === 'selector' ? mark.selector : mark.kind === 'testId' || mark.kind === 'placeholder' ? mark.value : mark.kind === 'role' ? mark.role : undefined;
+        const value = mark.kind === 'selector' ? mark.selector : mark.kind === 'testId' || mark.kind === 'placeholder' ? mark.value : undefined;
         if (value !== undefined) throw new EngineError('UNSUPPORTED_CAPABILITY', `Revyl refused the ${mark.kind} ${JSON.stringify(value)}`, { retryable: false, cause: error });
         throw new EngineError('ENGINE_FAILURE', `Revyl refused the engine's ${mark.kind} query`, { retryable: false });
       }

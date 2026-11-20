@@ -779,12 +779,12 @@ describe('revylWeb()', () => {
     expect(calls.some((call) => call.path.endsWith('/screenshot'))).toBe(false);
   });
 
-  it('names a refused test id, but not a refused engine query, which can carry page text', async () => {
+  it('names a refused test id, but not a refused query the engine built, which can carry page text', async () => {
     const note = node('my secret note', [100, 300, 600, 330]);
     tree = () => node('', [0, 0, 1280, 800], [note]);
     queries[FIELD] = [note];
     queries[':placeholder-shown'] = [];
-    const refused = new Set([markSelector({ kind: 'labelShown', label: 'my secret note' }), markSelector({ kind: 'testId', value: 'save', attribute: 'data-testid' })]);
+    const refused = new Set([markSelector({ kind: 'labelShown', label: 'my secret note' }), markSelector({ kind: 'testId', value: 'save', attribute: 'data-testid' }), roleCss('heading')]);
     const inner = globalThis.fetch;
     vi.stubGlobal('fetch', async (url: string, init: RequestInit) =>
       String(url).endsWith('/maestro_web_query') && refused.has((JSON.parse(String(init.body)) as { css: string }).css) ? new Response('{"detail":"bad selector"}', { status: 400 }) : inner(url, init),
@@ -798,6 +798,7 @@ describe('revylWeb()', () => {
       code: 'UNSUPPORTED_CAPABILITY',
       message: expect.stringContaining('"save"'),
     });
+    await expect(engine.locate!(role('heading'), context())).rejects.toMatchObject({ code: 'ENGINE_FAILURE' });
   });
 
   it('never sends a password value to Revyl as a selector', async () => {
